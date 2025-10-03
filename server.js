@@ -10,7 +10,10 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static("Frontend"));
+
+// ⭐️ CORRECTION 1: Use path.join(__dirname, 'public') for reliable pathing.
+// This tells Express to look for static files (like CSS, JS, images) in the 'public' folder.
+app.use(express.static(path.join(__dirname))); 
 
 mongoose
   .connect(
@@ -140,7 +143,9 @@ const courseSchema = new mongoose.Schema(
 
 const Course  = mongoose.model("Course", courseSchema);
 
-//Course Routes
+//--------------------------------------------------------------
+// Course Routes
+//--------------------------------------------------------------
 
 app.get('/api/courses', async (req, res) =>{
        try {
@@ -234,7 +239,10 @@ app.get("/api/courses/:id", async (req, res) => {
   }
 });
 
+//--------------------------------------------------------------
 // Student Routes
+//--------------------------------------------------------------
+
 app.get("/api/students", async (req, res) => {
   try {
     const students = await Student.find().sort({ createdAt: -1 });
@@ -330,6 +338,32 @@ app.get("/api/students/search", async (req, res) => {
   }
 });
 
+app.get("/api/students/:id", async (req, res) => {
+    try {
+        // Check for valid MongoDB ObjectId format before querying (a good practice)
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ message: 'Invalid student ID format' });
+        }
+        
+        // Use lean() for performance if you don't need Mongoose document methods
+        const student = await Student.findById(req.params.id).lean();
+        
+        if (!student) {
+            // Return 404 if the query was successful but found no document
+            return res.status(404).json({ message: 'Student not found' });
+        }
+        
+        res.json(student); 
+    } catch (error) {
+        // Send a 500 status for database/server errors
+        res.status(500).json({ message: error.message });
+    }
+});
+
+//--------------------------------------------------------------
+// Dashboard & Health Routes
+//--------------------------------------------------------------
+
 // Dashboard Stats
 app.get('/api/dashboard/stats', async (req, res) => {
     try {
@@ -382,7 +416,6 @@ app.get('/health/detailed', async (req, res) => {
         // Use connection.readyState for robust status check (1 is connected)
         const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
         
-        // Use a consistent variable name for clarity
         const heapMemoryUsage = process.memoryUsage();
         const currentUptime = process.uptime(); 
         
@@ -413,12 +446,8 @@ app.get('/health/detailed', async (req, res) => {
             environment: process.env.NODE_ENV || 'development'
         };
 
-        // **CRITICAL: This sends a single response and stops. It does NOT refresh the page.**
         res.status(200).json(healthCheck);
     } catch (error) {
-        // Log the error for debugging purposes
-        // logger.error('Health check failed:', error); 
-        
         res.status(500).json({
             status: 'DOWN',
             timestamp: new Date().toISOString(),
@@ -428,32 +457,6 @@ app.get('/health/detailed', async (req, res) => {
 });
 
 
-//Get single student by ID
-app.get('/api/students/:id', async (req, res) => {
-    try {
-        // Check for valid MongoDB ObjectId format before querying (a good practice)
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({ message: 'Invalid student ID format' });
-        }
-        
-        // Use lean() for performance if you don't need Mongoose document methods
-        const student = await Student.findById(req.params.id).lean();
-        
-        if (!student) {
-            // Return 404 if the query was successful but found no document
-            return res.status(404).json({ message: 'Student not found' });
-        }
-        
-        // **CRITICAL: This sends a single response and stops. It does NOT refresh the page.**
-        res.json(student); 
-    } catch (error) {
-        // Log the error for debugging purposes
-        // logger.error('Error fetching student:', error);
-        
-        // Send a 500 status for database/server errors
-        res.status(500).json({ message: error.message });
-    }
-});
 // Helper function to format uptime
 function formatUptime(seconds) {
     seconds = Math.floor(seconds); 
@@ -477,25 +480,16 @@ function formatUptime(seconds) {
     return parts.join(' ');
 }
 
+//--------------------------------------------------------------
+// ⭐️ CORRECTION 2: Catch-All Route for Frontend (SPA Routing)
+// This must come LAST, after all specific API routes.
+// It ensures any non-API request serves the main index.html file.
+//--------------------------------------------------------------
 
-
-
-
-
-
-
-// ... (Your existing API routes, health checks, student routes, etc.)
-
-// ➡️ ADD THIS BLOCK AT THE END:
-// This ensures any request to the root path (/) is served the index.html file.
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'Frontend', 'index.html'));
-});
-
-// Optional: Add a general 404 handler after all other routes
 app.get('*', (req, res) => {
-    res.status(404).json({ message: "API Route Not Found" });
+    res.sendFile(path.join(__dirname,'index.html'));
 });
+
 
 const PORT = process.env.PORT || 3000;
 
@@ -503,4 +497,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 })
-
