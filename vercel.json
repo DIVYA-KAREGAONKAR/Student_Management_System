@@ -2,25 +2,25 @@
   "version": 2,
   "builds": [
     {
-      "src": "server.js", 
+      "src": "server.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
+    
+    { 
+      "src": "/(index\\.html|package\\.json|package-lock\\.json|vercel\\.json|.*\\.js|.*\\.css|.*\\.log)",
+      "dest": "/$1"
+    },
    
-    {
+    { 
       "src": "/api/(.*)",
-      "dest": "server.js" 
+      "dest": "/server.js" 
     },
-    
-    {
-      "src": "/health(.*)",
-      "dest": "server.js" 
-    },
-    
-    {
-      "src": "/(.*)",
-      "dest": "/index.html" 
+   
+    { 
+      "src": "/.*", 
+      "dest": "/server.js" 
     }
   ]
 }
