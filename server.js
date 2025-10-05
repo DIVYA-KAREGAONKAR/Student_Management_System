@@ -16,7 +16,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname))); 
 
 // Looks for the URI from process.env.MONGO_URI (best practice)
-const atlasURI = "mongodb+srv://divyakaregaonkar_db_user:5nf1U89va2Vgymk1@cluster0.9qhdjft.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+const atlasURI = process.env.MONGO_URI;
 
 const connectDB = async () => {
   try {
