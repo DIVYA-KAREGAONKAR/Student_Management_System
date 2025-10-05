@@ -11,26 +11,57 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ⭐️ CORRECTION 1: Use path.join(__dirname, 'public') for reliable pathing.
-// This tells Express to look for static files (like CSS, JS, images) in the 'public' folder.
+// Serving static files (assuming frontend is in the root or a build directory)
 app.use(express.static(path.join(__dirname))); 
 
-// Looks for the URI from process.env.MONGO_URI (best practice)
+// Load MongoDB Atlas URI from environment variables (must be set in Vercel settings)
 const atlasURI = process.env.MONGO_URI;
 
-const connectDB = async () => {
-  try {
-    await mongoose.connect(atlasURI); 
-    console.log('Project connected to MongoDB Atlas!');
-  } catch (err) {
-    console.error('Atlas connection error:', err);
-    process.exit(1);
-  }
-};
-// Call connectDB and start your Express server
-connectDB();
+// ==========================================================
+// ⭐️ CRITICAL FIX: VERCEL/SERVERLESS CONNECTION CACHING ⭐️
+// This logic caches the database connection, preventing timeouts on Vercel.
+// ==========================================================
 
-// Removed duplicate PORT declaration and listen call here
+// Define the global cache object
+let cached = global.mongoose;
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
+
+const connectDB = async () => {
+  // 1. Return cached connection if available
+  if (cached.conn) {
+    console.log('Using existing cached DB connection.');
+    return cached.conn;
+  }
+
+  // 2. Create a new promise if none exists
+  if (!cached.promise) {
+    if (!atlasURI) {
+        throw new Error('MONGO_URI is not defined in environment variables.');
+    }
+    
+    const opts = {
+      bufferCommands: false, // Essential for serverless functions
+    };
+
+    cached.promise = mongoose.connect(atlasURI, opts).then((mongoose) => {
+      console.log('New DB connection established and cached.');
+      return mongoose;
+    }).catch(err => {
+        console.error('Atlas connection error:', err);
+        throw err; 
+    });
+  }
+
+  // 3. Await the promise and store the connection
+  cached.conn = await cached.promise;
+  return cached.conn;
+};
+
+// ==========================================================
+// LOGGER & MIDDLEWARE SETUP (Unchanged)
+// ==========================================================
 
 // Configure Winston Logger
 const logger = winston.createLogger({
@@ -90,58 +121,29 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: "Internal server error" });
 });
 
+// ==========================================================
+// MODELS (Unchanged)
+// ==========================================================
+
 const studentSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      required: true,
-    },
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-    },
-    course: {
-      type: String,
-      required: true,
-    },
-    enrollmentDate: {
-      type: Date,
-      required: true,
-    },
-    status: {
-      type: String,
-      enum: ["active", "inactive"],
-      default: "active",
-    },
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true },
+    course: { type: String, required: true },
+    enrollmentDate: { type: Date, required: true },
+    status: { type: String, enum: ["active", "inactive"], default: "active" },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 const Student = mongoose.model("Student", studentSchema);
 
 const courseSchema = new mongoose.Schema(
     {
-        name:{
-            type: String,
-            required: true,
-            unique: true
-        },
-        description:{
-            type: String,
-            required: true
-        },
-        duration: {
-            type: Number,
-            required: true
-        },
-        status:{
-            type: String,
-            enum:["active", "inactive"],
-            default: "active"
-        }
+        name:{ type: String, required: true, unique: true },
+        description:{ type: String, required: true },
+        duration: { type: Number, required: true },
+        status:{ type: String, enum:["active", "inactive"], default: "active" }
     },{
         timestamps: true
     }
@@ -149,8 +151,25 @@ const courseSchema = new mongoose.Schema(
 
 const Course  = mongoose.model("Course", courseSchema);
 
+// ==========================================================
+// Middleware to ensure DB connection before every API route
+// ==========================================================
+const ensureDbConnection = async (req, res, next) => {
+    try {
+        await connectDB(); // This uses the cached connection or establishes a new one
+        next();
+    } catch (error) {
+        // If connection fails, immediately respond with a service error
+        res.status(503).json({ message: 'Database connection unavailable' });
+    }
+};
+
+// Apply the middleware to all API routes
+app.use('/api', ensureDbConnection);
+
+
 //--------------------------------------------------------------
-// Course Routes
+// Course Routes (Unchanged Logic)
 //--------------------------------------------------------------
 
 app.get('/api/courses', async (req, res) =>{
@@ -246,7 +265,7 @@ app.get("/api/courses/:id", async (req, res) => {
 });
 
 //--------------------------------------------------------------
-// Student Routes
+// Student Routes (Unchanged Logic)
 //--------------------------------------------------------------
 
 app.get("/api/students", async (req, res) => {
@@ -346,28 +365,24 @@ app.get("/api/students/search", async (req, res) => {
 
 app.get("/api/students/:id", async (req, res) => {
     try {
-        // Check for valid MongoDB ObjectId format before querying (a good practice)
         if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
             return res.status(400).json({ message: 'Invalid student ID format' });
         }
         
-        // Use lean() for performance if you don't need Mongoose document methods
         const student = await Student.findById(req.params.id).lean();
         
         if (!student) {
-            // Return 404 if the query was successful but found no document
             return res.status(404).json({ message: 'Student not found' });
         }
         
         res.json(student); 
     } catch (error) {
-        // Send a 500 status for database/server errors
         res.status(500).json({ message: error.message });
     }
 });
 
 //--------------------------------------------------------------
-// Dashboard & Health Routes
+// Dashboard & Health Routes (Unchanged Logic)
 //--------------------------------------------------------------
 
 // Dashboard Stats
@@ -419,7 +434,6 @@ app.get('/health', (req, res) => {
 // Detailed health check endpoint with MongoDB connection status
 app.get('/health/detailed', async (req, res) => {
     try {
-        // Use connection.readyState for robust status check (1 is connected)
         const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
         
         const heapMemoryUsage = process.memoryUsage();
@@ -427,7 +441,6 @@ app.get('/health/detailed', async (req, res) => {
         
         const systemInfo = {
             memory: {
-                // Convert bytes to MB and round
                 total: Math.round(heapMemoryUsage.heapTotal / 1024 / 1024),
                 used: Math.round(heapMemoryUsage.heapUsed / 1024 / 1024),
                 unit: 'MB'
@@ -442,7 +455,7 @@ app.get('/health/detailed', async (req, res) => {
 
         const healthCheck = {
             status: 'UP',
-            timestamp: new Date().toISOString(), // Use ISO string for standard format
+            timestamp: new Date().toISOString(),
             database: {
                 status: dbStatus,
                 name: 'MongoDB',
@@ -480,26 +493,27 @@ function formatUptime(seconds) {
     if (days > 0) parts.push(`${days}d`);
     if (hours > 0) parts.push(`${hours}h`);
     if (minutes > 0) parts.push(`${minutes}m`);
-    // Ensure seconds are shown if it's the only meaningful unit
     if (parts.length === 0 || remainingSeconds > 0) parts.push(`${remainingSeconds}s`); 
 
     return parts.join(' ');
 }
 
 //--------------------------------------------------------------
-// ⭐️ CORRECTION 2: Catch-All Route for Frontend (SPA Routing)
-// This must come LAST, after all specific API routes.
-// It ensures any non-API request serves the main index.html file.
+// Catch-All Route for Frontend (SPA Routing) - MUST BE LAST
 //--------------------------------------------------------------
 
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname,'index.html'));
+    // This serves the index.html file for all non-API routes
+    res.sendFile(path.join(__dirname,'index.html')); 
 });
 
 
-const PORT = process.env.PORT || 3000;
+// ==========================================================
+// ⭐️ CRITICAL FIX 3: EXPORT THE APP FOR VERCEL ⭐️
+// We remove app.listen() and export the app instance.
+// ==========================================================
 
 
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-})
+// IMPORTANT: Do NOT commit this temporary block to your main branch.
+// We still need to export the app for Vercel.
+module.exports = app; // Keeping this export is fine, but the listen is key for local run.
