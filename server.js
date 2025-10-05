@@ -15,16 +15,22 @@ app.use(express.json());
 // This tells Express to look for static files (like CSS, JS, images) in the 'public' folder.
 app.use(express.static(path.join(__dirname))); 
 
-mongoose
-  .connect(
-    process.env.MONGODB_URI || "mongodb://localhost:27017/student-management-app",
-    {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    }
-  )
-  .then(() => console.log("Connected to MongoDB"))
-  .catch((err) => console.error("MongoDB connection error:", err));
+// Looks for the URI from process.env.MONGO_URI (best practice)
+const atlasURI = "mongodb+srv://divyakaregaonkar_db_user:5nf1U89va2Vgymk1@cluster0.9qhdjft.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(atlasURI); 
+    console.log('Project connected to MongoDB Atlas!');
+  } catch (err) {
+    console.error('Atlas connection error:', err);
+    process.exit(1);
+  }
+};
+// Call connectDB and start your Express server
+connectDB();
+
+// Removed duplicate PORT declaration and listen call here
 
 // Configure Winston Logger
 const logger = winston.createLogger({
